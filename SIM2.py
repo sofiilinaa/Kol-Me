@@ -401,64 +401,148 @@ else:
         df = load_data(KEUANGAN_FILE)
         if df.empty:
             st.info("Belum ada data keuangan.")
+            st.stop()
         else:
             df["Tanggal"] = pd.to_datetime(df["Tanggal"])
-            df = df.sort_values("Tanggal")
+        df = df.sort_values("Tanggal")
 
-            total_debit = df["Debit"].sum()
-            total_kredit = df["Kredit"].sum()
+        total_debit = df["Debit"].sum()
+        total_kredit = df["Kredit"].sum()
 
-            total_row = pd.DataFrame([{
-                "Tanggal": "",
-                "Keterangan": " Total  ",
-                "Debit": total_debit,
-                "Kredit": total_kredit
-            }])
-            df_final = pd.concat([df, total_row], ignore_index=True)
+        total_row = pd.DataFrame([{
+            "Tanggal": "",
+            "Keterangan": " Total  ",
+            "Debit": total_debit,
+            "Kredit": total_kredit
+        }])
+        df_final = pd.concat([df, total_row], ignore_index=True)
 
-            df_final["Tanggal"] = pd.to_datetime(df_final["Tanggal"], errors='coerce')
-            df_final["Tanggal"] = df_final["Tanggal"].apply(lambda x: f"{x.day} {x.strftime('%B')}" if pd.notnull(x) else "")
-            df_final["Debit"] = df_final["Debit"].apply(lambda x: f"{x:,.0f}" if x != 0 else "")
-            df_final["Kredit"] = df_final["Kredit"].apply(lambda x: f"{x:,.0f}" if x != 0 else "")
+        df_final["Tanggal"] = pd.to_datetime(df_final["Tanggal"], errors='coerce')
+        df_final["Tanggal"] = df_final["Tanggal"].apply(lambda x: f"{x.day} {x.strftime('%B')}" if pd.notnull(x) else "")
+        df_final["Debit"] = df_final["Debit"].apply(lambda x: f"{x:,.0f}" if x != 0 else "")
+        df_final["Kredit"] = df_final["Kredit"].apply(lambda x: f"{x:,.0f}" if x != 0 else "")
 
-            st.dataframe(df_final[["Tanggal", "Keterangan", "Debit", "Kredit"]], use_container_width=True)
+        st.dataframe(df_final[["Tanggal", "Keterangan", "Debit", "Kredit"]], use_container_width=True)
 
-            saldo = total_debit - total_kredit
-            st.markdown(f"""
-            -  *Total Pemasukan (Debit):* Rp {total_debit:,.0f}  
-            -  *Total Pengeluaran (Kredit):* Rp {total_kredit:,.0f}  
-            """)
+        saldo = total_debit - total_kredit
+        st.markdown(f"""
+        -  *Total Pemasukan (Debit):* Rp {total_debit:,.0f}  
+        -  *Total Pengeluaran (Kredit):* Rp {total_kredit:,.0f}  
+        """)
 
-            if st.button("🗑 Hapus Semua Data"):
-                pd.DataFrame().to_csv(KEUANGAN_FILE)
-                pd.DataFrame().to_csv(PRODUKSI_FILE)
-                pd.DataFrame().to_csv(PENJUALAN_FILE)
-                pd.DataFrame().to_csv(PENGISIAN_STOK_FILE)
-                pd.DataFrame([{"Stok": 1000}]).to_csv(STOK_FILE, index=False)
-                st.warning("Semua data dihapus dan stok direset ke 1000 Kg.")
+        if st.button("🗑 Hapus Semua Data"):
+            pd.DataFrame().to_csv(KEUANGAN_FILE)
+            pd.DataFrame().to_csv(PRODUKSI_FILE)
+            pd.DataFrame().to_csv(PENJUALAN_FILE)
+            pd.DataFrame().to_csv(PENGISIAN_STOK_FILE)
+            pd.DataFrame([{"Stok": 1000}]).to_csv(STOK_FILE, index=False)
+            st.warning("Semua data dihapus dan stok direset ke 1000 Kg.")
 
-        st.subheader("📚 Buku Besar")
+        st.subheader("Buku Besar")
 
-        akun_list = df["Keterangan"].unique()
+        df_buku_besar = df.copy()
+    
+        df_kas = df_buku_besar[df_buku_besar["Keterangan"].str.strip() == "Kas"].copy()
+        if not df_kas.empty:
+            df_kas = df_kas.groupby('Tanggal').agg({
+                'Debit': 'sum',
+                'Kredit': 'sum',
+                'Keterangan': 'first'
+            }).reset_index()
+        
+        df_non_kas = df_buku_besar[df_buku_besar["Keterangan"].str.strip() != "Kas"]
+        df_buku_besar = pd.concat([df_non_kas, df_kas], ignore_index=True)
+    
+        akun_list = sorted(df_buku_besar["Keterangan"].str.strip().unique())
         selected_akun = st.selectbox("Pilih Akun:", akun_list)
 
-        # Filter transaksi per akun
-        df_akun = df[df["Keterangan"] == selected_akun].copy()
-        if selected_akun == "Kas":
-            df_akun = df_akun.groupby(['Tanggal', 'Keterangan']).agg({
-                'Debit': 'sum',
-                'Kredit': 'sum'
-             }).reset_index()
+        df_akun = df_buku_besar[df_buku_besar["Keterangan"].str.strip() == selected_akun].copy()
         df_akun = df_akun.sort_values("Tanggal").reset_index(drop=True)
 
-        # Hitung saldo berjalan (running balance)
-        df_akun["Saldo"] = (df_akun["Debit"] - df_akun["Kredit"]).cumsum()
+        if selected_akun == "Kas":
+            df_akun["Saldo"] = (df_akun["Debit"] - df_akun["Kredit"]).cumsum()
+        elif selected_akun in ["Penjualan Kol", "Modal"]:
+            df_akun["Saldo"] = (df_akun["Kredit"] - df_akun["Debit"]).cumsum()
+        else:
+            df_akun["Saldo"] = (df_akun["Debit"] - df_akun["Kredit"]).cumsum()
 
-        # Format tampilan
         df_akun_display = df_akun.copy()
         df_akun_display["Tanggal"] = df_akun_display["Tanggal"].dt.strftime("%d %b %Y")
-        df_akun_display["Debit"] = df_akun_display["Debit"].apply(lambda x: f"{x:,.0f}" if x != 0 else "")
-        df_akun_display["Kredit"] = df_akun_display["Kredit"].apply(lambda x: f"{x:,.0f}" if x != 0 else "")
-        df_akun_display["Saldo"] = df_akun_display["Saldo"].apply(lambda x: f"{x:,.0f}")
+        df_akun_display["Debit"] = df_akun_display["Debit"].apply(lambda x: f"Rp {x:,.0f}" if x != 0 else "")
+        df_akun_display["Kredit"] = df_akun_display["Kredit"].apply(lambda x: f"Rp {x:,.0f}" if x != 0 else "")
+        df_akun_display["Saldo"] = df_akun_display["Saldo"].apply(lambda x: f"Rp {x:,.0f}")
 
-        st.dataframe(df_akun_display[["Tanggal", "Keterangan", "Debit", "Kredit", "Saldo"]], use_container_width=True)    
+        st.dataframe(
+            df_akun_display[["Tanggal", "Keterangan", "Debit", "Kredit", "Saldo"]], 
+            use_container_width=True,
+            column_config={
+                "Debit": st.column_config.Column(width="small"),
+                "Kredit": st.column_config.Column(width="small"),
+                "Saldo": st.column_config.Column(width="small")
+        }
+    )
+
+    # ========== NERACA SALDO ==========
+        st.subheader("Neraca Saldo")
+    
+        df_neraca = df.copy()
+    
+    # Kelompokkan berdasarkan akun dan hitung total debit/kredit
+        df_neraca = df_neraca.groupby('Keterangan').agg({
+            'Debit': 'sum',
+            'Kredit': 'sum'
+        }).reset_index()
+
+    # Hitung saldo untuk masing-masing akun
+        def hitung_saldo(row):
+            akun = row['Keterangan'].strip()
+            if akun in ["Kas"]:  # Akun aktiva
+                return row['Debit'] - row['Kredit']
+            elif akun in ["Penjualan Kol"]:  # Akun pendapatan
+                return row['Kredit'] - row['Debit']
+            else:  # Beban dan lainnya
+                return row['Debit'] - row['Kredit']
+
+        df_neraca['Saldo'] = df_neraca.apply(hitung_saldo, axis=1)
+
+    # Klasifikasi akun
+        def klasifikasi_akun(akun):
+            akun = akun.strip()
+            if akun == "Kas":
+                return "Aktiva"
+            elif akun == "Penjualan Kol":
+                return "Pendapatan"
+            elif akun == "Beban Produksi":
+                return "Beban"
+            else:
+                return "Lainnya"
+
+        df_neraca['Klasifikasi'] = df_neraca['Keterangan'].apply(klasifikasi_akun)
+
+    # Format tampilan
+        df_neraca_display = df_neraca.copy()
+        df_neraca_display['Debit'] = df_neraca_display['Debit'].apply(lambda x: f"Rp {x:,.0f}" if x != 0 else "")
+        df_neraca_display['Kredit'] = df_neraca_display['Kredit'].apply(lambda x: f"Rp {x:,.0f}" if x != 0 else "")
+        df_neraca_display['Saldo'] = df_neraca_display['Saldo'].apply(lambda x: f"Rp {x:,.0f}")
+
+    # Tampilkan neraca saldo
+        st.dataframe(
+            df_neraca_display[['Keterangan', 'Klasifikasi', 'Debit', 'Kredit', 'Saldo']],
+            use_container_width=True,
+            hide_index=True
+        )
+
+    # Hitung total debit dan kredit
+        total_debit_neraca = df_neraca['Debit'].sum()
+        total_kredit_neraca = df_neraca['Kredit'].sum()
+
+        st.markdown(f"""
+        **Total Debit:** Rp {total_debit_neraca:,.0f}  
+        **Total Kredit:** Rp {total_kredit_neraca:,.0f}  
+        **Selisih:** Rp {abs(total_debit_neraca - total_kredit_neraca):,.0f}
+        """)
+
+        if total_debit_neraca == total_kredit_neraca:
+            st.success("✅ Neraca seimbang")
+        else:
+            st.error("❌ Neraca tidak seimbang! Periksa kembali entri jurnal.")
