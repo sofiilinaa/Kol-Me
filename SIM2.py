@@ -2,6 +2,29 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import os
+import streamlit as st
+import re
+
+def input_uang_otomatis(label, key):
+    # Ambil input mentah user
+    raw_input = st.session_state.get(key, "0")
+
+    # Bersihkan ke digit saja
+    angka_bersih = re.sub(r"[^\d]", "", raw_input)
+
+    # Format ke 'Rp xxx.xxx'
+    if angka_bersih:
+        angka_int = int(angka_bersih)
+        formatted = f"{angka_int:,}".replace(",", ".")
+    else:
+        formatted = "0"
+
+    # Tampilkan input yang terformat kembali ke field
+    input_baru = st.text_input(label, value=formatted, key=key, label_visibility="visible")
+
+    # Return nilai numerik
+    return int(re.sub(r"[^\d]", "", input_baru)) if input_baru else 0
+
 
 # SETUP FILE DAN KONSTANTA
 os.makedirs("data", exist_ok=True)
@@ -128,7 +151,7 @@ if not st.session_state["login"]:
 else:
     with st.sidebar:
         st.markdown(f":material/person: Login sebagai:\n`{st.session_state['username']}`")
-        halaman = st.selectbox("Pilih Halaman", ["Home", "Produksi", "Penjualan", "Isi Stok", "Jurnal Umum"])
+        halaman = st.selectbox("Pilih Halaman", ["Home", "Produksi", "Penjualan", "Isi Stok", "Laporan Keuangan"])
         st.session_state["halaman"] = halaman
         if st.button(":material/logout: Logout"):
             set_user_login_status(st.session_state["username"], False)
@@ -157,22 +180,22 @@ else:
         st.title(":material/box_add: Tambah Transaksi Produksi")
         tanggal = st.date_input("Tanggal Produksi", value=datetime.today())
 
-        bibit = st.number_input("Bibit (Rp 100/batang)", min_value=0, step=1)
-        pupuk = st.number_input("Pupuk (Rp 30.000/kantong)", min_value=0, step=1)
-        biaya_perawatan = st.number_input("Biaya Perawatan (Rp)", min_value=0)
-        biaya_tenaga_kerja = st.number_input("Biaya Tenaga Kerja (Rp)", min_value=0)
+        jumlah_bibit = input_uang_otomatis("Bibit (Rp 100/batang)", key="bibit")
+        jumlah_pupuk = input_uang_otomatis("Pupuk (Rp 30.000/kantong)", key="pupuk")
+        biaya_perawatan = input_uang_otomatis("Biaya Perawatan (Rp)", key="perawatan")
+        biaya_tenaga_kerja = input_uang_otomatis("Biaya Tenaga Kerja (Rp)", key="tenaga_kerja")
 
-        total = bibit * HARGA_BIBIT + pupuk * HARGA_PUPUK + biaya_perawatan + biaya_tenaga_kerja
+        total = jumlah_bibit * HARGA_BIBIT + jumlah_pupuk * HARGA_PUPUK + biaya_perawatan + biaya_tenaga_kerja
         st.info(f"Total Biaya Produksi: Rp {total:,.0f}")
 
         if st.button(":material/save: Simpan Produksi"):
             df = load_data(PRODUKSI_FILE)
             new = pd.DataFrame([{
                 "Tanggal": tanggal.strftime("%Y-%m-%d"),
-                "Bibit (Batang)": bibit,
-                "Total Harga Bibit": bibit * HARGA_BIBIT,   #Pastikan dihitung
-                "Pupuk (Kantong)": pupuk,
-                "Total Harga Pupuk": pupuk * HARGA_PUPUK,   #Pastikan dihitung
+                "Bibit (Batang)": jumlah_bibit,
+                "Total Harga Bibit": jumlah_bibit * HARGA_BIBIT,   #Pastikan dihitung
+                "Pupuk (Kantong)": jumlah_pupuk,
+                "Total Harga Pupuk": jumlah_pupuk * HARGA_PUPUK,   #Pastikan dihitung
                 "Biaya Perawatan": biaya_perawatan,
                 "Biaya Tenaga Kerja": biaya_tenaga_kerja,
                 "Total Biaya": total
@@ -266,7 +289,7 @@ else:
         kode = f"J-{tanggal_jual.strftime('%Y%m%d')}"
         st.text_input("Kode Transaksi", value=kode, disabled=True)
 
-        jumlah = st.number_input("Jumlah Kol Terjual (Kg)", 0)
+        jumlah = input_uang_otomatis("Jumlah Kol Terjual (Kg)", key="jumlah_terjual")
         total = jumlah * HARGA_KOL
         st.info(f"Total Penjualan: Rp {total:,.0f}")
 
@@ -313,8 +336,10 @@ else:
             st.markdown("### 🧹 Hapus Transaksi Penjualan")
             opsi_hapus = st.selectbox(
                 "Pilih transaksi yang ingin dihapus:",
-                options=[f"{i+1}. {row['Tanggal'].strftime('%Y-%m-%d')} | {row['Jumlah Kol (Kg)']} kg | Total {row['Total Penjualan']}" 
-                         for i, row in df_penjualan.iterrows()],
+                options=[
+                    f"{i+1}. {row['Tanggal'].strftime('%Y-%m-%d')} | {int(row['Jumlah Kol (Kg)']):,} Kg | Total Rp {int(row['Total Penjualan']):,}".replace(",", ".") 
+                    for i, row in df_penjualan.iterrows()
+                ],
                 key="pilih_hapus_penjualan"
             )
 
@@ -396,7 +421,7 @@ else:
             st.info("Belum ada riwayat pengisian atau pengurangan stok.")
 
     # HALAMAN LAPORAN
-    elif halaman == 'Jurnal Umum':
+    elif halaman == 'Laporan Keuangan':
         st.title(":material/request_quote: Jurnal Umum")
         df = load_data(KEUANGAN_FILE)
         if df.empty:
